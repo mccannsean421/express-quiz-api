@@ -2,7 +2,105 @@ const express = require('express');
 const router = express.Router();
 const QuestionModel = require('../models/Question');
 const CategoryModel = require('../models/Category');
+const UserModel = require('../models/User');
 const { body, check, validationResult } = require('express-validator');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const auth = require("../middleware/auth");
+require('dotenv').config();
+
+router.get('/', auth, async (req, res) => {
+  res.status(200).send("Welcome 🙌 ");
+});
+
+// User Registration
+router.post(
+  '/register',
+  body('name').notEmpty().trim().escape(),
+  body('email').notEmpty().trim().escape(),
+  body('password').notEmpty().trim().escape(),
+  async (req, res) => {
+
+  try {
+    const { name, email, password } = req.body;
+
+    // Error handling
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const oldUser = await UserModel.findOne({ email });
+
+    if (oldUser) {
+      return res.status(409).send("User Already Exist. Please Login");
+    }
+
+    //Encrypt user password
+    encryptedPassword = await bcrypt.hash(password, 10);
+
+    const user = await UserModel.create({
+      name,
+      email,
+      password: encryptedPassword,
+    });
+
+    // Create token
+    const token = jwt.sign(
+      { user_id: user._id, email },
+      process.env.TOKEN_KEY,
+      {
+        expiresIn: "2h",
+      }
+    );
+
+    // save user token
+    user.token = token;
+
+    // return new user
+    res.status(201).json(user);
+
+  } catch (error) {
+    console.log(error);
+  }
+});
+
+router.post('/login', async (req, res) => {
+
+  // Our login logic starts here
+  try {
+    // Get user input
+    const { email, password } = req.body;
+
+    // Validate user input
+    if (!(email && password)) {
+      res.status(400).send("All input is required");
+    }
+    // Validate if user exist in our database
+    const user = await UserModel.findOne({ email });
+
+    if (user && (await bcrypt.compare(password, user.password))) {
+      // Create token
+      const token = jwt.sign(
+        { user_id: user._id, email },
+        process.env.TOKEN_KEY,
+        {
+          expiresIn: "2h",
+        }
+      );
+
+      // save user token
+      user.token = token;
+
+      // user
+      res.status(200).json(user);
+    }
+    res.status(400).send("Invalid Credentials");
+  } catch (err) {
+    console.log(err);
+  }
+});
 
 /**
  * get all quiz questions
@@ -12,13 +110,7 @@ router.get('/questions', async (req, res) => {
   return res.status(200).json(questions)
 });
 
-/**
- * Create a new question
- * @param {string} question - The actual text of the question
- * @param {boolean} is_active - Whether or not the question should be shown
- * @param {array} choices - An array of possible answers
- * @param {array} categories - Categories this question belongs under
- */
+// Create a new question
 router.post(
   '/questions',
   body('question').notEmpty().trim().escape(),
